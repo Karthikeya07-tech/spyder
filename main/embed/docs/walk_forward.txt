@@ -1,0 +1,35 @@
+Twist front walk, 30 s: motor angles
+========================================
+
+Files in this folder
+  walk_forward_deg.csv    time_s, ID1..ID12  servo degrees 0..300 (150 = middle). The reference walk, unchanged.
+  walk_forward_ticks.csv  same rows as AX-12A goal positions 0..1023 (512 = middle)
+  walk_forward_rad.csv    same rows as Gazebo joint angles in radians (sim calibration below)
+  walk_forward.h          WALK_FRAMES[1026][12] ticks for ESP32 firmware
+  neutral_pose.csv          measured neutral pose (robot, 2026-11-02)
+  play_action.py        plays the walk on the real robot through the U2D2
+
+Timing: 1026 frames, 30 ms apart = 30.78 s (one 54-frame cycle of 1.62 s, repeated 19 times)
+Servos: 12 x AX-12A, 222222 baud, Protocol 1.0. ticks = deg * 1023/300.
+The Gazebo playback sends exactly these ticks (checked: 0 tick difference).
+
+Sim calibration (~/twist_ws/src/twist_dxl_walker/config/motor_ids.yaml):
+  joint_rad = direction * (ticks - 512 - offset) / 195.38
+
+ ID joint            leg           dir  offset  neutral  walk min..max deg  walk min..max ticks
+  1 leg1_hip_yaw     rear-right      1      -4      508       89 .. 126           303 .. 430     
+  2 leg1_hip_pitch   rear-right     -1    -208      304       66 .. 110           225 .. 375     
+  3 leg1_knee        rear-right      1    -512        0       10 .. 34             34 .. 116     
+  4 leg2_hip_yaw     front-right     1      -3      509      173 .. 211           590 .. 720     
+  5 leg2_hip_pitch   front-right     1     206      718      191 .. 235           651 .. 801     
+  6 leg2_knee        front-right    -1     508     1020      261 .. 289           890 .. 985     
+  7 leg3_hip_yaw     front-left      1      -3      509       89 .. 126           303 .. 430     
+  8 leg3_hip_pitch   front-left     -1    -206      306       66 .. 110           225 .. 375     
+  9 leg3_knee        front-left      1    -512        0       10 .. 34             34 .. 116     
+ 10 leg4_hip_yaw     rear-left       1      -1      511      173 .. 210           590 .. 716     
+ 11 leg4_hip_pitch   rear-left       1     207      719      189 .. 233           644 .. 795     
+ 12 leg4_knee        rear-left      -1     508     1020      266 .. 290           907 .. 989     
+
+Neutral = Gazebo spawn pose (all joints 0 rad). hip_pitch direction flipped on all legs:
+found in Gazebo (only sign set that keeps the body up and walks), not yet checked on the robot.
+Result in Gazebo: walked ~2.3 m in 30 s along -Y, body 7.2-8.1 cm high, tilt < 4 deg.

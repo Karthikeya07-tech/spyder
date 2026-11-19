@@ -1,0 +1,22 @@
+Twist action: turn_right (from the Android app)
+==================================================
+
+Turn right on the spot: the app's `rightx` table (54 frames, 1.62 s per cycle), 6 cycles.
+The app never plays this table; in Gazebo it turns the robot in place.
+Source: emotion_bundle.java, rightx + motor_offset.
+
+324 rows, 30 ms apart = 9.69 s. Starts at the measured neutral.
+
+ ID  min deg  max deg
+  1    131.0    169.0
+  2     66.0    110.0
+  3     23.0     46.0
+  4    130.0    168.0
+  5    192.0    235.0
+  6    248.0    275.0
+  7    131.0    169.0
+  8     66.0    110.0
+  9     23.0     47.0
+ 10    131.0    168.0
+ 11    189.0    234.0
+ 12    253.0    277.0

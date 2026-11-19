@@ -1,0 +1,30 @@
+Twist neutral pose (measured on the robot)
+===========================================
+
+The reference start and stand pose. Every walk and turn starts here and eases back here.
+Measured on the real robot on 2026-11-02 after the microcontroller's `neutral` action.
+Source: hardware/neutral_pose.yaml
+
+Servos: 12 x AX-12A. ticks 0..1023 = 0..300 deg, 512 = 150 deg = middle.
+degrees = ticks * 300 / 1023
+Legs: leg1 = rear-right, leg2 = front-right, leg3 = front-left, leg4 = rear-left.
+Per leg: hip_yaw, hip_pitch, knee.
+
+In Gazebo this pose is the spawn pose (every joint 0 rad).
+
+ ID joint            leg           ticks   deg
+  1 leg1_hip_yaw     rear-right      508   149.0
+  2 leg1_hip_pitch   rear-right      304    89.1
+  3 leg1_knee        rear-right        0     0.0
+  4 leg2_hip_yaw     front-right     509   149.3
+  5 leg2_hip_pitch   front-right     718   210.6
+  6 leg2_knee        front-right    1020   299.1
+  7 leg3_hip_yaw     front-left      509   149.3
+  8 leg3_hip_pitch   front-left      306    89.7
+  9 leg3_knee        front-left        0     0.0
+ 10 leg4_hip_yaw     rear-left       511   149.9
+ 11 leg4_hip_pitch   rear-left       719   210.9
+ 12 leg4_knee        rear-left      1020   299.1
+
+Goal ticks the firmware's neutral action sent:
+  [511, 306, 0, 511, 716, 1023, 511, 306, 0, 511, 716, 1023]

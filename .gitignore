@@ -1,0 +1,13 @@
+# ESP-IDF build output
+build/
+.cache/
+
+# Generated config; sdkconfig.defaults is the source of truth
+sdkconfig
+sdkconfig.old
+
+# Downloaded by the component manager from dependencies.lock
+managed_components/
+
+# Local IDE setup
+.vscode/

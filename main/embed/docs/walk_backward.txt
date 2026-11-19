@@ -1,0 +1,35 @@
+Twist backward walk, 30 s: motor angles
+========================================
+
+Source: the Android app (Twist-main/pathfindingsimulator, emotion_bundle.java, back()):
+  the same 54-frame `frontx` table as the front walk, played in reverse (frame 53 -> 0),
+  degrees = ticks*300/1023 (integer), plus the back() offsets
+  [0, 0, -10, 0, +9, +10, 0, 0, -10, 0, 0, +10] for ID1..ID12.
+  (Check: the same table with the front() offsets reproduces walk_forward_cycle.csv exactly.)
+  60 knee values fell outside 0..300 deg (-10 / up to 310). The app sends those as invalid goals
+  that the AX-12A ignores, so the knee stays at its limit; here they are clamped to 0 / 300.
+
+Files
+  walk_backward_cycle.csv   one cycle (54 frames) twice, app format: pass, frame, servo_1..servo_12
+  walk_backward_deg.csv  time_s, ID1..ID12 servo degrees 0..300 (what play_action.py sends)
+  walk_backward_ticks.csv / _rad.csv / .h   same rows as ticks / Gazebo radians / ESP32 header
+
+Timing: 1026 frames, 30 ms apart = 30.78 s (1.62 s cycle x 19)
+
+ ID joint            leg           neutral  walk min..max deg  walk min..max ticks
+  1 leg1_hip_yaw     rear-right        508       89 .. 126           303 .. 430     
+  2 leg1_hip_pitch   rear-right        304       56 .. 100           191 .. 341     
+  3 leg1_knee        rear-right          0        0 .. 14              0 .. 48      
+  4 leg2_hip_yaw     front-right       509      173 .. 211           590 .. 720     
+  5 leg2_hip_pitch   front-right       718      192 .. 236           655 .. 805     
+  6 leg2_knee        front-right      1020      276 .. 300           941 .. 1023    
+  7 leg3_hip_yaw     front-left        509       89 .. 126           303 .. 430     
+  8 leg3_hip_pitch   front-left        306       56 .. 100           191 .. 341     
+  9 leg3_knee        front-left          0        0 .. 14              0 .. 48      
+ 10 leg4_hip_yaw     rear-left         511      173 .. 210           590 .. 716     
+ 11 leg4_hip_pitch   rear-left         719      199 .. 243           679 .. 829     
+ 12 leg4_knee        rear-left        1020      286 .. 300           975 .. 1023    
+
+Gazebo (headless, 2026-11-02): moved ~1.2 m in 30 s along +Y (opposite to the front walk's -Y),
+body 8.0-8.4 cm high, rocks side to side up to ~19 deg roll (front walk: < 4 deg), heading turns
+~25 deg in the first steps then stays steady. Verified on the real robot on 2026-11-02 (user: working).

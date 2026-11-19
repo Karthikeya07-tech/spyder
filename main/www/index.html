@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>Twist live map</title>
+<style>
+:root { --bg:#0e1116; --panel:#171c24; --ink:#e8edf4; --muted:#8b97a8; --accent:#3d9cf0; --wall:#1a1a1a; --free:#d9e2ec; --unk:#4a5564; --scan:#ff8a3d; --bot:#5eead4; }
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--ink);height:100dvh;display:flex;flex-direction:column}
+header{padding:.7rem 1rem;background:var(--panel);display:flex;justify-content:space-between;align-items:center;gap:.5rem}
+h1{font-size:1rem;font-weight:650}
+#meta{font-size:.75rem;color:var(--muted);text-align:right}
+canvas{flex:1;width:100%;background:#0b0d11;touch-action:none}
+nav{display:flex;gap:.4rem;padding:.6rem;background:var(--panel);flex-wrap:wrap}
+button{flex:1;min-width:6.5rem;padding:.7rem .5rem;border:0;border-radius:8px;background:#2a3340;color:var(--ink);font-weight:600}
+button.pri{background:var(--accent);color:#071018}
+button.danger{background:#8b3a3a}
+#hint{padding:.4rem 1rem .8rem;font-size:.75rem;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Twist live map</h1>
+  <div id="meta">connecting…</div>
+</header>
+<canvas id="c"></canvas>
+<nav>
+  <button class="pri" id="calib">Calibrate front</button>
+  <button id="zero">Zero yaw</button>
+  <button id="reset">Reset map</button>
+  <button id="stream">Stop stream</button>
+</nav>
+<div id="hint">Wi-Fi: Twist-auto / twistmap1 → this page. Arrow = robot front after calibrate. Walls fill in as the LiDAR spins; turn the body to paint more of the room.</div>
+<script>
+const W=200,H=200,RES=0.05,OX=-5,OY=-5;
+const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+const meta=document.getElementById('meta');
+let mapU8=null, state=null, streaming=true, mapVer=-1;
+
+function resize(){
+  const dpr=Math.max(1,window.devicePixelRatio||1);
+  cv.width=cv.clientWidth*dpr; cv.height=cv.clientHeight*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0); draw();
+}
+window.addEventListener('resize',resize);
+
+function worldToScreen(x,y,side){
+  /* world x forward, y left → screen up / left */
+  const mx=cv.clientWidth/2, my=cv.clientHeight/2, s=side/10;
+  return [mx - y*s, my - x*s];
+}
+function draw(){
+  const w=cv.clientWidth, h=cv.clientHeight;
+  ctx.fillStyle='#0b0d11'; ctx.fillRect(0,0,w,h);
+  const side=Math.min(w,h)*0.92;
+  if(mapU8){
+    const step=2, cell=side/10*RES*step+0.5;
+    for(let iy=0;iy<H;iy+=step){
+      for(let ix=0;ix<W;ix+=step){
+        const v=mapU8[iy*W+ix];
+        ctx.fillStyle=v>0?'#1e1f22':(v<0?'#d2dbe4':'#373f4c');
+        const [sx,sy]=worldToScreen(OX+(ix+0.5)*RES, OY+(iy+0.5)*RES, side);
+        ctx.fillRect(sx-cell/2, sy-cell/2, cell, cell);
+      }
+    }
+  }
+  if(!state) return;
+  const yaw=state.pose.yaw_deg*Math.PI/180;
+  const [rx,ry]=worldToScreen(state.pose.x,state.pose.y,side);
+  const scan=state.scan_mm||[];
+  ctx.fillStyle='#ff8a3d';
+  for(let i=0;i<scan.length;i++){
+    const mm=scan[i]; if(!mm) continue;
+    const a=i*Math.PI/180;
+    const xr=Math.cos(a)*(mm/1000), yr=Math.sin(a)*(mm/1000);
+    const x=xr*Math.cos(yaw)-yr*Math.sin(yaw);
+    const y=xr*Math.sin(yaw)+yr*Math.cos(yaw);
+    const [sx,sy]=worldToScreen(x,y,side);
+    ctx.fillRect(sx-1.2,sy-1.2,2.4,2.4);
+  }
+  ctx.save();
+  ctx.translate(rx,ry);
+  ctx.rotate(-yaw); /* canvas y-down; world yaw CCW from +X-up after our mapping */
+  ctx.fillStyle='#5eead4';
+  ctx.beginPath();
+  ctx.moveTo(0,-16); ctx.lineTo(10,12); ctx.lineTo(0,6); ctx.lineTo(-10,12); ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+async function post(path){
+  try{ await fetch(path,{method:'POST'}); }catch(e){}
+}
+document.getElementById('calib').onclick=()=>post('/api/imu/calibrate');
+document.getElementById('zero').onclick=()=>post('/api/imu/zero');
+document.getElementById('reset').onclick=()=>post('/api/map/reset');
+document.getElementById('stream').onclick=async ()=>{
+  streaming=!streaming;
+  await post(streaming?'/api/stream/start':'/api/stream/stop');
+  document.getElementById('stream').textContent=streaming?'Stop stream':'Start stream';
+};
+
+async function pullMap(ver){
+  if(ver===mapVer) return;
+  const r=await fetch('/api/map.bin');
+  if(!r.ok) return;
+  mapU8=new Int8Array(await r.arrayBuffer());
+  mapVer=ver;
+}
+function applyLive(j){
+  state=j;
+  meta.innerHTML=`yaw ${j.pose.yaw_deg.toFixed(1)}° · scan ${j.seq} · map v${j.map_version}<br>${j.imu.calibrated?'IMU ok':'calibrate IMU'} · ${j.streaming?'live':'paused'} · ${j.lidar?'LiDAR':'no LiDAR'}`;
+  streaming=!!j.streaming;
+  document.getElementById('stream').textContent=streaming?'Stop stream':'Start stream';
+  pullMap(j.map_version).then(draw);
+}
+
+let ws;
+function connectWs(){
+  ws=new WebSocket(`ws://${location.host}/ws/live`);
+  ws.onopen=()=>{ if(window._wsTick) clearInterval(window._wsTick);
+    window._wsTick=setInterval(()=>{ if(ws.readyState===1) ws.send('g'); },200); };
+  ws.onmessage=ev=>{ try{ applyLive(JSON.parse(ev.data)); }catch(e){} };
+  ws.onclose=()=>setTimeout(connectWs,800);
+}
+async function poll(){
+  try{
+    const r=await fetch('/api/live.json');
+    if(r.ok) applyLive(await r.json());
+  }catch(e){ meta.textContent='waiting for robot…'; }
+}
+connectWs();
+setInterval(()=>{ if(!ws||ws.readyState!==1) poll(); },250);
+resize();
+</script>
+</body>
+</html>
