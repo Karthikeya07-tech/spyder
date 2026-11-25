@@ -128,7 +128,7 @@ def build():
 
     footer = section.footer.paragraphs[0]
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    fr = footer.add_run("Spyder  ·  Firmware and application  ·  24 November 2026")
+    fr = footer.add_run("Spyder  ·  Firmware and application  ·  25 November 2026")
     set_run(fr, size=8, color=MUTED)
 
     add_para(doc, "SPYDER", size=12, bold=True, color=RED, space_after=0)
@@ -149,7 +149,7 @@ def build():
     )
     add_para(
         doc,
-        "24 November 2026",
+        "25 November 2026. Updates the 24 November note with the pose tracker and the phone motion controls that are now in the code.",
         size=10,
         color=MUTED,
         space_after=14,
@@ -164,18 +164,18 @@ def build():
         doc,
         "To do that the robot must know the space around it and know which way it is facing. "
         "LiDAR on USB supplies the room and the objects. The IMU supplies orientation. "
-        "The phone application is the live view of that same world. "
-        "The body already has walking and turning gaits so it can move while that map is built.",
+        "The phone application is the live view of that same world, and it is now also how walk and turn clips are started. "
+        "Autonomous A to B is still the goal. It is not running yet.",
     )
     add_para(doc, "In one line: see the room, know the nose, walk from A to B.")
 
     heading(doc, "2. Where we are today", 1)
     add_para(
         doc,
-        "Firmware and application already run as one loop. The robot starts its motors path, IMU, and LiDAR USB. "
-        "The phone joins the robot Wi-Fi, starts the scan, calibrates the front, and draws the live map. "
-        "Autonomous A to B is the goal of that loop; it is not running yet. "
-        "What is running is sensing, orientation, live mapping to the phone, and playable walk/turn gaits.",
+        "Firmware and application already run as one loop. The robot opens USB for the motors and the LiDAR, starts the IMU, "
+        "keeps a live occupancy grid in RAM, and opens Wi-Fi Twist-auto. The phone joins that network, starts the scan, "
+        "calibrates the front, draws the map, and can queue stand, walk, and turn. "
+        "A first pose tracker is in the firmware: yaw comes from the IMU, and x and y step one map cell only while a walk clip is actually running and the scan matches the grid.",
     )
     add_table(
         doc,
@@ -183,40 +183,78 @@ def build():
         [
             [
                 "Bring-up",
-                "On boot the firmware opens USB for motors and LiDAR, starts the IMU, starts the live map in RAM, and opens Wi-Fi Twist-auto.",
+                "On boot the firmware opens USB for motors and LiDAR, starts the gait player, starts the IMU, starts the live map, opens Wi-Fi, plays neutral once, then scans the servos.",
             ],
             [
                 "LiDAR",
-                "RPLIDAR A1 on USB-OTG. Motor stays off until the app sends Start scan. Then ranges are packed into 360 bins and sent to the phone.",
+                "RPLIDAR on USB-OTG. Motor stays off until Start scan. Ranges are packed into 360 bins and sent to the phone.",
             ],
             [
                 "IMU",
-                "On GPIO 7/8. Calibrate front sets the current heading as yaw 0. That heading is the teal nose on the map.",
+                "On GPIO 7/8. Calibrate front sets the current heading as yaw 0 and clears gyro bias. That heading is the blue nose on the phone.",
             ],
             [
                 "Live map",
-                "Occupancy grid in RAM (200 × 200, 5 cm). Walls and free space grow from LiDAR rays at the current IMU yaw. Not saved to flash.",
+                "One occupancy grid in RAM, 200 × 200 cells at 5 cm, origin (−5 m, −5 m). Rays are drawn from the current pose. The grid is not saved to flash.",
+            ],
+            [
+                "Pose",
+                "Started. x and y stay put unless the robot is walking, the match score is at least 12, and a neighbouring 5 cm cell is at least 4 hits better. Turns change yaw and do not add translation.",
             ],
             [
                 "Application",
-                "Spyder joins Twist-auto, streams live.json / WebSocket, and paints the room, objects, scan hits, and nose in real time.",
+                "Spyder joins Twist-auto, streams the live map, shows x, y, and yaw, and sends Forward, Back, Left, Right, and Neutral.",
             ],
             [
                 "Moving logic",
-                "Embedded gaits on 12 AX servos: stand, walk forward, walk backward, turn left, turn right. Played from the robot today.",
+                "Five embedded clips on 12 AX servos. The phone, the web page, and the serial console can queue them. Stop ends the clip and plays neutral.",
             ],
             [
                 "A → B",
-                "This is the project goal. The robot does not yet pick a goal on the map or walk there by itself.",
+                "Not running. There is no saved room, no chosen goal, no path, and no follower. The red A on the phone is the world origin, not a goal.",
             ],
         ],
     )
 
-    heading(doc, "3. The system (firmware + application)", 1)
+    heading(doc, "3. What this update adds", 1)
+    add_para(
+        doc,
+        "The 24 November note stopped at sensing, a map drawn from the origin, and gaits started on the robot. "
+        "The code since then starts the first two pieces of the path-planning plan.",
+    )
+    add_table(
+        doc,
+        ["Area", "Now in the code"],
+        [
+            [
+                "Gait player",
+                "One cycle is 54 frames, 1.62 s. Walk clips are 19 cycles. Turn clips are 6. A request can play N cycles. Stop cancels the clip and queues neutral.",
+            ],
+            [
+                "Pose",
+                "GET /api/pose and the pose fields in /api/live.json report x, y, yaw, localized, and match score. Scan rays use that pose.",
+            ],
+            [
+                "Phone motion",
+                "Forward, Back, Left, Right, and Neutral call POST /api/action/<name>. One clip plays. Two more can wait. A full queue is rejected.",
+            ],
+            [
+                "Phone map",
+                "The arrow sits on the live pose. A red A marks (0, 0). Free space is white, walls are near-black, the live sweep is orange. Pinch, pan, and Recenter are on the canvas.",
+            ],
+        ],
+    )
+    add_para(
+        doc,
+        "Still measured on the bench, not in the code: metres per walk cycle, degrees per turn cycle, and the body rectangle. "
+        "The follower must not use those numbers until they are written down. A starting inflation guess of 0.25 m stays a guess.",
+    )
+
+    heading(doc, "4. The system (firmware + application)", 1)
     add_para(
         doc,
         "There is one product, two programs. Twist-auto on the ESP32-P4 is the robot. "
-        "Spyder on Android is the operator view. They talk over the robot’s own Wi-Fi; the phone has no other server.",
+        "Spyder on Android is the operator view. They talk over the robot’s own Wi-Fi. The phone has no other server.",
     )
     add_table(
         doc,
@@ -224,159 +262,241 @@ def build():
         [
             [
                 "Role",
-                "Sense, map, move the body.",
-                "Connect, start scan, show the live room.",
+                "Sense, map, hold the pose, play gaits.",
+                "Connect, show the room, start scan and motion.",
             ],
             [
                 "Where",
-                r"D:\Pony\Twist-auto  —  ESP32-P4, ESP-IDF.",
-                r"C:\Users\siren\AndroidStudioProjects\Spyder  —  Android.",
+                "ESP-IDF project Twist-auto, target ESP32-P4. GitHub: Karthikeya07-tech/spyder.",
+                "Kotlin, Jetpack Compose, package com.example.spyder, Android 10 and up. GitHub: Karthikeya07-tech/Spyder-Auto-.",
             ],
             [
                 "Link",
-                "SoftAP SSID Twist-auto, password twistmap1, http://192.168.4.1",
-                "Joins that AP and pins HTTP/WebSocket to 192.168.4.1.",
+                "SoftAP SSID Twist-auto, password twistmap1, http://192.168.4.1, port 80.",
+                "Joins that AP and pins HTTP and WebSocket to 192.168.4.1.",
             ],
             [
                 "LiDAR",
-                "USB host to the A1 CP2102. SCAN only after the app asks.",
-                "Start scan / Stop. Live ranges as orange dots.",
+                "USB host to the LiDAR adapter. SCAN only after the app asks.",
+                "Start scan / Stop. Live ranges as orange dots, drawn from the pose.",
             ],
             [
                 "IMU",
-                "Read yaw. Calibrate and zero-yaw endpoints.",
-                "Calibrate front / Zero arrow. Teal nose follows yaw.",
+                "Read yaw. Calibrate and zero-yaw endpoints. Calibrate also resets the live map.",
+                "Calibrate front / Zero arrow. Blue nose follows yaw.",
             ],
             [
                 "Map",
-                "Integrates each scan into occupancy. Serves /api/live.json, /api/map.bin, /ws/live.",
-                "Polls or sockets ~5 Hz. Fetches map.bin when the version changes. Draws walls and free space.",
+                "Integrates each scan into one occupancy grid. Serves /api/live.json, /api/map.bin, /api/pose, and /ws/live.",
+                "WebSocket, with a poll fallback. Refetches map.bin when map_version changes.",
             ],
             [
                 "Motion",
-                "USB2AX on GPIO 26/27, Dynamixel Protocol 1, 12 servos, gait playback.",
-                "Does not send walk commands today. Mapping and calibration only.",
+                "USB2AX on GPIO 26/27, Dynamixel Protocol 1, 12 servos, queued playback, stop to neutral.",
+                "Sends the five action names. Does not send goals, plans, or step-by-step servo commands.",
             ],
         ],
     )
 
-    heading(doc, "4. Firmware today", 1)
+    heading(doc, "5. Firmware that is running", 1)
     add_para(
         doc,
-        "Boot order is: USB and motors, IMU orientation, then the live map link. "
-        "The LiDAR motor does not spin until the application asks.",
+        "Boot order is motors, gait player, LiDAR, IMU, live map, then Wi-Fi. "
+        "The LiDAR motor does not spin until the application asks. Neutral plays once when the servo adapter is up.",
     )
     heading(doc, "Hardware on the robot", 2)
     add_table(
         doc,
         ["Item", "Connection"],
         [
-            ["Compute", "ESP32-P4. On-board ESP32-C6 for Wi-Fi (hosted SDIO)."],
-            ["LiDAR", "RPLIDAR A1, CP2102 USB-UART, P4 USB-OTG HS."],
-            ["Servos", "12× Robotis AX, Protocol 1 at 222222 baud, USB2AX (VID 16D0:06A7)."],
-            ["Servo USB", "GPIO 27 D+, GPIO 26 D−, GND, 5 V. Separate from the LiDAR port."],
+            ["Compute", "ESP32-P4. On-board ESP32-C6 for Wi-Fi (ESP-Hosted)."],
+            ["LiDAR", "RPLIDAR over USB-UART (CP210x or CH34x) on the P4 USB-OTG high-speed port."],
+            ["Servos", "12× Robotis AX, IDs 1–12, Protocol 1 at 222222 baud, USB2AX or U2D2."],
+            ["Servo USB", "GPIO 27 D+, GPIO 26 D−. Separate from the LiDAR port."],
             ["IMU", "I2C GPIO 7 SDA, GPIO 8 SCL. Mount yaw 180° (sensor X faces the back)."],
         ],
     )
-    heading(doc, "What firmware does after power-on", 2)
-    bullet(doc, "USB host: LiDAR on OTG HS, USB2AX on GPIO 26/27.")
-    bullet(doc, "Open the LiDAR adapter if it is plugged in. Do not SCAN yet.")
-    bullet(doc, "Start IMU. Yaw 0 is front after calibrate.")
-    bullet(doc, "Start a 200 × 200 occupancy grid in RAM (10 m × 10 m, 5 cm cells).")
-    bullet(doc, "Start Wi-Fi Twist-auto and HTTP on port 80.")
-    bullet(doc, "On POST /api/scan/start: motor on, SCAN, publish 360 ranges and occupancy to the app.")
+    heading(doc, "Gaits", 2)
     add_para(
         doc,
-        "LiDAR: one revolution becomes 360 bins, 1° each. Bin 0 is robot front (180° mount offset). "
-        "The USB adapter enumerating is not the same as the A1 answering. "
-        "A live feed exists once the A1 returns GET_INFO and SCAN; the app then receives new ranges.",
-    )
-    heading(doc, "Moving logic on the robot", 2)
-    add_para(
-        doc,
-        "Walking is in the firmware. Twelve AX servos (IDs 1–12) get sync-written goal positions. "
-        "Gaits are embedded in flash and played at 30 ms per frame.",
+        "Twelve AX servos get sync-written goal positions. Clips are embedded in flash and played at 30 ms per frame. "
+        "A play request returns immediately as queued. One action runs at a time.",
     )
     add_table(
         doc,
-        ["Action", "What it is"],
+        ["Action", "Frames", "What it is"],
         [
-            ["neutral", "Stand / home pose."],
-            ["walk_forward", "Forward walking cycle."],
-            ["walk_backward", "Reverse walking cycle."],
-            ["turn_left", "In-place left turn."],
-            ["turn_right", "In-place right turn."],
+            ["neutral", "90 (2.7 s)", "Stand. Not a gait cycle. Played after stop."],
+            ["walk_forward", "1026 (19 × 1.62 s)", "Forward walking clip."],
+            ["walk_backward", "1026 (19 × 1.62 s)", "Reverse walking clip."],
+            ["turn_left", "324 (6 × 1.62 s)", "In-place left turn."],
+            ["turn_right", "324 (6 × 1.62 s)", "In-place right turn."],
         ],
     )
     add_para(
         doc,
-        "These are the motions the robot uses to move through the room while LiDAR and IMU keep the map updated. "
-        "They are started on the robot (serial: action walk_forward, and the other names) when USB2AX is connected.",
+        "Serial examples: action walk_forward 1 plays one cycle. action stop, POST /api/action/stop, and POST /api/nav/stop end the current clip and then play neutral. "
+        "The phone buttons play the whole clip. The cycle count is there for the tape measure and for the later follower.",
+    )
+    heading(doc, "Pose, as implemented", 2)
+    add_para(
+        doc,
+        "This is the start of Phase 1, in a smaller form than the full scan matcher in the plan. "
+        "Heading is the calibrated IMU yaw. Translation does not come from the IMU, and it does not yet come from a predicted step length.",
+    )
+    bullet(doc, "x and y stay where they are when the robot is still. A turn changes yaw and does not slide the arrow.")
+    bullet(doc, "While walk_forward or walk_backward is the clip actually running, the matcher looks at the eight neighbouring 5 cm cells.")
+    bullet(doc, "It steps one cell only when the current match score is at least 12 and the neighbour beats staying put by at least 4 hits.")
+    bullet(doc, "localized is true only when the match score is at least 12. Rays are integrated from (x, y, yaw).")
+    add_para(
+        doc,
+        "Not in this build: a gait prediction between scans, a search window of about ±0.3 m and ±10°, a second static grid, or a window that recenters on the pose. "
+        "The older 20 m map baked into flash is still a separate reference. Navigation uses the live 10 m grid.",
+    )
+    add_para(
+        doc,
+        "Bench checks still to run after this firmware is flashed: stand still after calibrate and confirm the arrow stays at the origin; "
+        "walk one cycle and confirm the arrow leaves the origin only during that clip; turn one cycle and confirm x and y stay put.",
+    )
+    heading(doc, "HTTP the phone already uses", 2)
+    add_table(
+        doc,
+        ["Call", "Role"],
+        [
+            ["GET /api", "Catalog of the routes that exist."],
+            ["GET /api/status", "Health: LiDAR, IMU, streaming, yaw, map size."],
+            ["GET /api/live.json and GET /ws/live", "Pose, 360 ranges, map version. The socket expects the client to send g."],
+            ["GET /api/pose", "x, y, yaw_deg, localized, calibrated, match score."],
+            ["GET /api/map.bin", "40,000 int8 log-odds cells. Above 0 occupied, below 0 free, 0 unknown."],
+            ["POST /api/scan/start and /stop", "LiDAR motor on or off. /api/stream/start and /stop are the same calls."],
+            ["POST /api/imu/calibrate and /zero", "Front heading. Calibrate also resets the live map."],
+            ["POST /api/map/reset", "Clear the occupancy grid."],
+            ["POST /api/action/<name>", "Queue neutral, walk_forward, walk_backward, turn_left, or turn_right. Optional ?cycles=N."],
+            ["GET /api/action", "busy, current, queued."],
+            ["POST /api/action/stop and POST /api/nav/stop", "Cancel and play neutral. This is the only navigation route that exists."],
+        ],
+    )
+    add_para(
+        doc,
+        "A page at GET / draws the same live map in a browser on the robot Wi-Fi. The phone does not use that page. It calls the API itself. "
+        "Frame on the robot: x is forward, y is left, yaw is counterclockwise, and yaw 0 is the heading set by calibrate.",
     )
 
-    heading(doc, "5. Application today", 1)
+    heading(doc, "6. Application that is running", 1)
     add_para(
         doc,
-        "Spyder is the same system on the phone. It does not host a second map. "
-        "It connects to the robot and draws the live occupancy and the live LiDAR in the colours chosen in the app.",
+        "Spyder is one screen. It does not keep a second map. "
+        "It joins the robot, draws the occupancy and the live sweep, and sends the motion commands the firmware already plays.",
     )
-    heading(doc, "Connection and controls", 2)
+    heading(doc, "Connection", 2)
     add_para(
         doc,
-        "The app looks for SSID Twist-auto, uses password twistmap1, and keeps HTTP and WebSocket on 192.168.4.1 "
-        "on that network. Live data is WebSocket /ws/live (the app sends “g” about five times a second). "
-        "If the socket is not available it polls GET /api/live.json at the same rate. When map_version changes it loads /api/map.bin.",
+        "The app looks for SSID Twist-auto, uses password twistmap1, and keeps HTTP and WebSocket on 192.168.4.1 on that network. "
+        "Live data is WebSocket /ws/live. The app sends g about five times a second. "
+        "If the socket does not open, it polls GET /api/live.json. When map_version changes it loads /api/map.bin. "
+        "Action status is polled on GET /api/action. There is no Bluetooth and no USB path in the app.",
     )
+    heading(doc, "Controls", 2)
     add_table(
         doc,
         ["On the phone", "On the robot", "What you get"],
         [
-            ["Join Twist-auto", "SoftAP", "Link to the robot."],
-            ["Start scan", "POST /api/scan/start", "LiDAR motor on; live frames."],
-            ["Stop", "POST /api/scan/stop", "LiDAR motor off."],
-            ["Calibrate front", "POST /api/imu/calibrate", "Still-bias; yaw 0 = nose."],
-            ["Zero arrow", "POST /api/imu/zero", "Heading only."],
+            ["Join Twist-auto", "SoftAP", "Link to the robot. The screen stays on while the link is live."],
+            ["Start scan / Stop", "POST /api/scan/start and /stop", "LiDAR motor on or off. Stream start and stop are the fallback."],
+            ["Calibrate front", "POST /api/imu/calibrate", "Hold still. Yaw 0 becomes the nose. The live map is cleared."],
+            ["Zero arrow", "POST /api/imu/zero", "Heading only, without a new bias."],
             ["Reset map", "POST /api/map/reset", "Clear occupancy RAM."],
+            ["Forward, Back, Left, Right, Neutral", "POST /api/action/<name>", "Queue a clip. The line under the buttons shows what is playing and what is waiting."],
         ],
     )
-    heading(doc, "Live map on screen", 2)
     add_para(
         doc,
-        "The canvas is the present room. Occupied cells are walls and objects. "
-        "Free cells are floor the LiDAR has seen. The current sweep is drawn as dots. "
-        "The robot is at the origin on the map today; the arrow turns with IMU yaw. "
-        "Frame: +X forward (up on screen), +Y left.",
+        "One move plays and two can wait. When that queue is full the buttons stay disabled and the app says so. "
+        "The buttons send the whole clip. They do not yet send cycles=1, and there is no Stop-motion button on the phone. "
+        "Scan Stop stops the LiDAR, not the gait.",
+    )
+    heading(doc, "Map on screen", 2)
+    add_para(
+        doc,
+        "The canvas is a plot of the robot frame: +X to the right, +Y up. "
+        "The blue arrow is the live pose from the firmware, not a marker glued to the centre. "
+        "Red A is (0, 0), the start of the grid, and it is not a goal the operator picked. "
+        "Orange dots are the current sweep, placed from that same pose. Pinch zoom, pan, and Recenter are on the canvas. "
+        "The telemetry line shows x, y, hit count, and map version.",
     )
     add_table(
         doc,
         ["On screen", "Colour", "Meaning"],
         [
-            ["Unknown", "Dark charcoal (#1A1E24)", "Not yet observed."],
-            ["Free space", "Cool grey-blue", "Open floor."],
-            ["Wall / object", "Near-white (#F4F7FA)", "Occupied — room and obstacles."],
-            ["Live scan", "Orange (#FF7A18)", "Current LiDAR hits."],
-            ["Nose", "Teal (#2AD2C9)", "Forward after calibrate."],
-            ["Grid", "Muted grey, 1 m", "Scale."],
+            ["Unknown", "Grey", "Not yet observed."],
+            ["Free space", "White", "Open floor."],
+            ["Wall / object", "Near-black", "Occupied."],
+            ["Live scan", "Orange", "Current LiDAR hits."],
+            ["Nose", "Blue", "Heading after calibrate, drawn at the live pose."],
+            ["A", "Red", "World origin (0, 0). Not a stored goal."],
+        ],
+    )
+
+    heading(doc, "7. A to B: started, and not started", 1)
+    add_para(
+        doc,
+        "The plan in “path planning and goal selection” is unchanged. This table is how far the code has gone along it.",
+    )
+    add_table(
+        doc,
+        ["Phase", "Status"],
+        [
+            [
+                "0 — Measure, and be able to stop",
+                "Started. Cycle length, cancel, and N-cycle play are in the firmware. Metres, degrees, and body size are not measured yet.",
+            ],
+            [
+                "1 — A pose that moves",
+                "Started, in the small form above. The full correlative match and the gait prediction are not in.",
+            ],
+            [
+                "2 — Save the room",
+                "Not started. One live grid. No static layer, no save, no load.",
+            ],
+            [
+                "3 — Pick A and B",
+                "Not started. The phone has no Set A, no tap for B, and no rejection of a point inside a wall.",
+            ],
+            [
+                "4 — Plan only",
+                "Not started. No A* and no /api/nav/plan.",
+            ],
+            [
+                "5 — Follow the path",
+                "Not started. Stop-to-neutral exists, because Phase 0 needed it. There is no follower state machine.",
+            ],
+            [
+                "6 and 7 — Obstacles and recovery",
+                "Not started. A dropped Wi-Fi link does not yet force neutral. A weak pose does not yet abort a mission, because no mission runs.",
+            ],
         ],
     )
     add_para(
         doc,
-        "The in-app legend is the same: Nose (teal), Scan (orange), Wall (white). "
-        "As the robot turns, white structure fills in and orange dots follow the live sweep.",
+        "Endpoints from the plan that are still absent: /api/map/save, /api/map/load, /api/map/static.bin, "
+        "/api/nav/goal, /api/nav/plan, /api/nav/start, and GET /api/nav. POST /api/nav/stop is present and means the same thing as action stop.",
     )
 
-    heading(doc, "6. How firmware and the app meet", 1)
-    add_para(doc, "A session today looks like this:")
-    bullet(doc, "Robot boots. Motors path, IMU, LiDAR adapter, Wi-Fi.")
+    heading(doc, "8. A session today", 1)
+    bullet(doc, "Robot boots. Servo USB, gait player, LiDAR adapter, IMU, live map, Wi-Fi. Neutral plays once the adapter is up.")
     bullet(doc, "Phone opens Spyder and joins Twist-auto.")
-    bullet(doc, "Start scan. LiDAR data is pushed to the app.")
-    bullet(doc, "Calibrate front. IMU heading becomes the teal arrow.")
-    bullet(doc, "The map shows the room and real-time objects in the app colours.")
-    bullet(doc, "On the robot, walk and turn gaits can run while that map stays live.")
+    bullet(doc, "Start scan. LiDAR ranges and the occupancy grid arrive on the phone.")
+    bullet(doc, "Hold still. Calibrate front. The blue arrow is yaw 0, and the map starts clean.")
+    bullet(doc, "Forward, Back, Left, or Right queues a clip. The arrow may step while a walk is playing and the scan matches. A turn should change heading without sliding x and y.")
+    bullet(doc, "The room is visible, the nose is known, and the body can be driven. Nothing yet chooses B or walks there alone.")
+
+    heading(doc, "9. Next", 1)
+    bullet(doc, "On the robot, time one walk cycle and one turn cycle. Record metres, degrees, and the body rectangle.")
+    bullet(doc, "Flash this pose build and run the three bench checks: still, one walk cycle, one turn cycle.")
+    bullet(doc, "After those hold, split a saved room from the live obstacles, then add Set A, Set B, and Plan with the servos still idle.")
     add_para(
         doc,
-        "That is the current product: one firmware and one application, sensing and showing the room, with moving logic on the bot. "
-        "The goal those pieces serve is still autonomous travel from point A to point B.",
+        "Repos: firmware https://github.com/Karthikeya07-tech/spyder and application https://github.com/Karthikeya07-tech/Spyder-Auto-.",
         space_before=6,
     )
 
