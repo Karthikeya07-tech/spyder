@@ -10,6 +10,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
+#include "u2d2.h"
 #include "usb/cdc_acm_host.h"
 #include "usb/vcp_ch34x.h"
 #include "usb/vcp_cp210x.h"
@@ -248,14 +249,9 @@ static bool probe_baud(uint32_t baud, bool do_reset)
     return true;
 }
 
-esp_err_t lidar_ping(void)
+static esp_err_t ping_device(void)
 {
-    if (s_stream) {
-        printf("LiDAR is streaming. Type: live stop   then   lping\n");
-        return ESP_ERR_INVALID_STATE;
-    }
     if (s_cdc == NULL) {
-        printf("LiDAR USB adapter not open. Plug CP2102 into USB-OTG, USB2AX stays on GPIO26/27.\n");
         return ESP_ERR_INVALID_STATE;
     }
     for (size_t i = 0; i < sizeof(s_bauds) / sizeof(s_bauds[0]); i++) {
@@ -268,6 +264,22 @@ esp_err_t lidar_ping(void)
         if (probe_baud(s_bauds[i], true)) {
             return ESP_OK;
         }
+    }
+    return ESP_ERR_TIMEOUT;
+}
+
+esp_err_t lidar_ping(void)
+{
+    if (s_stream) {
+        printf("LiDAR is streaming. Type: live stop   then   lping\n");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (s_cdc == NULL) {
+        printf("LiDAR USB adapter not open. Plug CP2102 into USB-OTG, USB2AX stays on GPIO26/27.\n");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (ping_device() == ESP_OK) {
+        return ESP_OK;
     }
     printf("LiDAR USB adapter open, but RPLIDAR did not answer GET_INFO (A5 50).\n");
     return ESP_ERR_TIMEOUT;
@@ -509,13 +521,19 @@ static bool stream_resync(void)
 
 static bool stream_arm_scan(void)
 {
+    bool ok = false;
+
     if (s_cdc == NULL) {
         return false;
     }
-    if (s_arm_fails > 0 && (s_arm_fails % 3) == 0) {
+
+    /* USB2AX VID polling uses the same USB host; pause it for the SCAN handshake. */
+    u2d2_pause_probe(true);
+
+    if (s_arm_fails > 0 && (s_arm_fails % 5) == 0) {
         ESP_LOGW(TAG, "live scan: RESET + GET_INFO, then SCAN again");
         if (!stream_resync()) {
-            return false;
+            goto done;
         }
     }
 
@@ -526,20 +544,24 @@ static bool stream_arm_scan(void)
 
     /* A1 adapter: DTR false = motor on. Same order as robot/lidar_rplidar.py. */
     cdc_acm_host_set_control_line_state(s_cdc, false, true);
-    vTaskDelay(pdMS_TO_TICKS(1200));
+    vTaskDelay(pdMS_TO_TICKS(2000));
     rx_flush();
 
     if (send_cmd(CMD_SCAN) != ESP_OK) {
         ESP_LOGW(TAG, "SCAN command TX failed");
-        return false;
+        goto done;
     }
     uint8_t desc[7];
-    if (!read_descriptor(desc, 2500)) {
-        return false;
+    if (!read_descriptor(desc, 3000)) {
+        goto done;
     }
     s_arm_fails = 0;
     ESP_LOGI(TAG, "live SCAN ok  desc %02X %02X  type 0x%02X", desc[0], desc[1], desc[6]);
-    return true;
+    ok = true;
+
+done:
+    u2d2_pause_probe(false);
+    return ok;
 }
 
 static void stream_task(void *arg)
@@ -550,14 +572,19 @@ static void stream_task(void *arg)
         while (!s_stream || !s_ready || s_cdc == NULL) {
             vTaskDelay(pdMS_TO_TICKS(100));
         }
-        ESP_LOGI(TAG, "live scan start (0 deg = robot front, yaw offset %.0f, baud %" PRIu32 ")",
-                 s_yaw_deg, s_baud);
+        if (s_arm_fails == 0) {
+            ESP_LOGI(TAG, "arming SCAN (0 deg = robot front, yaw offset %.0f, baud %" PRIu32 ")",
+                     s_yaw_deg, s_baud);
+        }
         if (!stream_arm_scan()) {
             s_arm_fails++;
             if ((s_arm_fails % 5) == 1) {
-                ESP_LOGW(TAG, "live SCAN descriptor missing (try %d)", s_arm_fails);
+                ESP_LOGW(TAG, "live SCAN descriptor missing (try %d) — app has no ranges yet",
+                         s_arm_fails);
             }
-            send_cmd(CMD_STOP);
+            if (s_cdc) {
+                send_cmd(CMD_STOP);
+            }
             vTaskDelay(pdMS_TO_TICKS(400));
             continue;
         }
@@ -655,7 +682,10 @@ static esp_err_t open_lidar(void)
     }
     s_cdc = cdc;
     ESP_LOGI(TAG, "LiDAR USB serial open");
-    lidar_ping();
+    /* Always GET_INFO/baud after (re)open, even if the app already asked to stream. */
+    if (ping_device() != ESP_OK) {
+        ESP_LOGW(TAG, "open ok, but GET_INFO failed — will still try SCAN");
+    }
     s_ready = true;
     if (s_ready_sem) {
         xSemaphoreGive(s_ready_sem);

@@ -17,6 +17,8 @@ esp_err_t u2d2_wait_ready(uint32_t timeout_ms);
 bool u2d2_is_ready(void);
 void u2d2_usb_scan(void);
 void u2d2_swap_dp_dm(bool swap);
+/* Stop USB2AX VID probing so LiDAR SCAN can use the host. */
+void u2d2_pause_probe(bool pause);
 
 void u2d2_rx_flush(void);
 esp_err_t u2d2_write(const uint8_t *data, size_t len);

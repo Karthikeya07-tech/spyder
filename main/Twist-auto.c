@@ -147,7 +147,15 @@ static int cmd_action(int argc, char **argv)
         actions_list();
         return 1;
     }
-    return action_play(argv[1]) == ESP_OK ? 0 : 1;
+    if (strcmp(argv[1], "stop") == 0) {
+        action_stop();
+        return 0;
+    }
+    unsigned cycles = 0;
+    if (argc >= 3) {
+        cycles = (unsigned)atoi(argv[2]);
+    }
+    return action_play_cycles(argv[1], cycles) == ESP_OK ? 0 : 1;
 }
 
 static int cmd_map(int argc, char **argv)
@@ -176,7 +184,12 @@ static int cmd_calibrate(int argc, char **argv)
     (void)argc;
     (void)argv;
     printf("Hold the robot STILL, front facing the way the arrow should point...\n");
-    return imu_calibrate(8000) == ESP_OK ? 0 : 1;
+    if (imu_calibrate(8000) != ESP_OK) {
+        return 1;
+    }
+    live_map_reset();
+    printf("Heading is now yaw 0. Map cleared so the scan is drawn in that frame.\n");
+    return 0;
 }
 
 static int cmd_zero(int argc, char **argv)
@@ -299,8 +312,8 @@ static void register_cmds(void)
     };
     const esp_console_cmd_t action = {
         .command = "action",
-        .help = "Play an action: action <name>",
-        .hint = "<name>",
+        .help = "Play an action: action <name> [cycles]. action stop ends it and plays neutral",
+        .hint = "<name> [cycles] | stop",
         .func = &cmd_action,
     };
     const esp_console_cmd_t mapc = {
@@ -311,7 +324,7 @@ static void register_cmds(void)
     };
     const esp_console_cmd_t live = {
         .command = "live",
-        .help = "Start/stop live LiDAR mapping: live [stop]",
+        .help = "Start/stop LiDAR SCAN (off at boot until app or: live / live stop)",
         .hint = "[stop]",
         .func = &cmd_live,
     };
@@ -372,6 +385,9 @@ void app_main(void)
              USB_DP_GPIO, USB_DM_GPIO, U2D2_BAUDRATE);
 
     ESP_ERROR_CHECK(u2d2_start());
+    if (actions_start() != ESP_OK) {
+        printf("Action player failed to start.\n");
+    }
     ESP_ERROR_CHECK(lidar_start());
     if (imu_start() != ESP_OK) {
         printf("IMU not found on GPIO%d/GPIO%d. Type iscan after wiring SDA/SCL.\n",
@@ -387,12 +403,18 @@ void app_main(void)
 
     printf("Waiting for USB2AX on GPIO%d/GPIO%d ...\n", USB_DP_GPIO, USB_DM_GPIO);
     if (u2d2_wait_ready(15000) == ESP_OK) {
+        printf("Boot: playing neutral once\n");
+        if (action_play("neutral") != ESP_OK) {
+            printf("Boot: neutral did not finish\n");
+        }
         dxl_scan(DXL_MAX_ID);
     } else {
-        printf("USB2AX not ready yet. Plug it in, then type: uscan   then   scan\n");
+        printf("USB2AX not ready yet. Neutral was not played. Plug it in, then: action neutral\n");
     }
     if (lidar_wait_ready(4000) != ESP_OK) {
         printf("LiDAR not seen yet. Plug CP2102 into USB-OTG, then type: lping\n");
+    } else {
+        printf("LiDAR detected. Motor stays off until the app POSTs /api/scan/start\n");
     }
 
     esp_console_repl_t *repl = NULL;

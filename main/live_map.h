@@ -21,6 +21,8 @@ typedef struct {
     bool lidar;
     bool imu;
     bool imu_calibrated;
+    bool localized;     /* scan agrees with the grid at this pose */
+    int match_score;    /* beam endpoints that landed on occupied cells */
 } live_state_t;
 
 esp_err_t live_map_start(void);

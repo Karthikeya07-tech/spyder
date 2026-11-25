@@ -29,14 +29,22 @@ button.danger{background:#8b3a3a}
   <button class="pri" id="calib">Calibrate front</button>
   <button id="zero">Zero yaw</button>
   <button id="reset">Reset map</button>
-  <button id="stream">Stop stream</button>
+  <button class="pri" id="stream">Start scan</button>
 </nav>
-<div id="hint">Wi-Fi: Twist-auto / twistmap1 → this page. Arrow = robot front after calibrate. Walls fill in as the LiDAR spins; turn the body to paint more of the room.</div>
+<nav>
+  <button data-action="neutral">Neutral</button>
+  <button data-action="walk_forward">Forward</button>
+  <button data-action="walk_backward">Back</button>
+  <button data-action="turn_left">Left</button>
+  <button data-action="turn_right">Right</button>
+  <button class="danger" id="stop">Stop</button>
+</nav>
+<div id="hint">Hold still and tap <b>Calibrate front</b>, then <b>Start scan</b>. The arrow stays put until the scan locks and you press Forward. Stop ends a clip and plays neutral. One cycle is 1.62 s: POST /api/action/walk_forward?cycles=1</div>
 <script>
 const W=200,H=200,RES=0.05,OX=-5,OY=-5;
 const cv=document.getElementById('c'), ctx=cv.getContext('2d');
 const meta=document.getElementById('meta');
-let mapU8=null, state=null, streaming=true, mapVer=-1;
+let mapU8=null, state=null, streaming=false, mapVer=-1;
 
 function resize(){
   const dpr=Math.max(1,window.devicePixelRatio||1);
@@ -74,8 +82,8 @@ function draw(){
     const mm=scan[i]; if(!mm) continue;
     const a=i*Math.PI/180;
     const xr=Math.cos(a)*(mm/1000), yr=Math.sin(a)*(mm/1000);
-    const x=xr*Math.cos(yaw)-yr*Math.sin(yaw);
-    const y=xr*Math.sin(yaw)+yr*Math.cos(yaw);
+    const x=state.pose.x + xr*Math.cos(yaw)-yr*Math.sin(yaw);
+    const y=state.pose.y + xr*Math.sin(yaw)+yr*Math.cos(yaw);
     const [sx,sy]=worldToScreen(x,y,side);
     ctx.fillRect(sx-1.2,sy-1.2,2.4,2.4);
   }
@@ -97,9 +105,13 @@ document.getElementById('zero').onclick=()=>post('/api/imu/zero');
 document.getElementById('reset').onclick=()=>post('/api/map/reset');
 document.getElementById('stream').onclick=async ()=>{
   streaming=!streaming;
-  await post(streaming?'/api/stream/start':'/api/stream/stop');
-  document.getElementById('stream').textContent=streaming?'Stop stream':'Start stream';
+  await post(streaming?'/api/scan/start':'/api/scan/stop');
+  document.getElementById('stream').textContent=streaming?'Stop scan':'Start scan';
 };
+document.querySelectorAll('[data-action]').forEach(btn=>{
+  btn.onclick=()=>post('/api/action/'+btn.dataset.action);
+});
+document.getElementById('stop').onclick=()=>post('/api/action/stop');
 
 async function pullMap(ver){
   if(ver===mapVer) return;
@@ -110,9 +122,10 @@ async function pullMap(ver){
 }
 function applyLive(j){
   state=j;
-  meta.innerHTML=`yaw ${j.pose.yaw_deg.toFixed(1)}° · scan ${j.seq} · map v${j.map_version}<br>${j.imu.calibrated?'IMU ok':'calibrate IMU'} · ${j.streaming?'live':'paused'} · ${j.lidar?'LiDAR':'no LiDAR'}`;
+  const locked = j.pose.localized ? 'pose locked' : 'pose settling';
+  meta.innerHTML=`x ${j.pose.x.toFixed(2)} m · y ${j.pose.y.toFixed(2)} m · yaw ${j.pose.yaw_deg.toFixed(1)}°<br>${j.imu.calibrated?'IMU calibrated':'calibrate IMU'} · ${locked} · ${j.streaming?'live':'paused'}`;
   streaming=!!j.streaming;
-  document.getElementById('stream').textContent=streaming?'Stop stream':'Start stream';
+  document.getElementById('stream').textContent=streaming?'Stop scan':'Start scan';
   pullMap(j.map_version).then(draw);
 }
 

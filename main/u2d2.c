@@ -36,10 +36,13 @@ static SemaphoreHandle_t s_dev_sem;
 static uint8_t s_rx[RX_BUF_SIZE];
 static size_t s_rx_len;
 static volatile bool s_ready;
+static volatile bool s_probe_paused;
+static volatile bool s_servo_present;
 static bool s_dp_dm_swapped;
 static uint16_t s_seen_vid;
 static uint16_t s_seen_pid;
 static uint8_t s_seen_class;
+static int s_open_fails;
 
 static const char *adapter_name(uint16_t vid, uint16_t pid)
 {
@@ -79,6 +82,11 @@ void u2d2_swap_dp_dm(bool swap)
              swap ? "ON" : "OFF", USB_DP_GPIO, USB_DM_GPIO);
 }
 
+void u2d2_pause_probe(bool pause)
+{
+    s_probe_paused = pause;
+}
+
 static void on_new_usb_dev(usb_device_handle_t usb_dev)
 {
     const usb_device_desc_t *desc = NULL;
@@ -92,12 +100,13 @@ static void on_new_usb_dev(usb_device_handle_t usb_dev)
     ESP_LOGI(TAG, "USB device found: VID=0x%04X PID=0x%04X class=0x%02X (%s)",
              s_seen_vid, s_seen_pid, s_seen_class, adapter_name(s_seen_vid, s_seen_pid));
     if (adapter_is_servo(s_seen_vid, s_seen_pid)) {
+        s_servo_present = true;
         ESP_LOGI(TAG, "Servo adapter - USB2AX/U2D2 on GPIO%d/GPIO%d", USB_DP_GPIO, USB_DM_GPIO);
+        if (s_dev_sem) {
+            xSemaphoreGive(s_dev_sem);
+        }
     } else if (s_seen_vid == 0x10C4 || s_seen_vid == 0x1A86) {
         ESP_LOGI(TAG, "Likely RPLIDAR USB-UART - lidar task will open it (not the servo path)");
-    }
-    if (s_dev_sem) {
-        xSemaphoreGive(s_dev_sem);
     }
 }
 
@@ -151,6 +160,7 @@ static void handle_event(const cdc_acm_host_dev_event_data_t *event, void *user_
         ESP_LOGW(TAG, "USB adapter disconnected");
         s_ready = false;
         s_cdc = NULL;
+        s_servo_present = false;
         s_seen_vid = 0;
         s_seen_pid = 0;
         s_seen_class = 0;
@@ -272,11 +282,18 @@ static esp_err_t open_u2d2(void)
     uint16_t vid = USB2AX_VID;
     uint16_t pid = USB2AX_PID;
 
+    if (s_probe_paused) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     /* Only open the servo adapter. Never CDC_ANY — that would steal the LiDAR. */
     err = open_cdc_vid_pid(USB2AX_VID, USB2AX_PID, &cdc);
     if (err != ESP_OK) {
         static const uint16_t pids[] = {U2D2_PID_FT232H, U2D2_PID_FT232R};
         for (size_t i = 0; i < sizeof(pids) / sizeof(pids[0]); i++) {
+            if (s_probe_paused) {
+                return ESP_ERR_INVALID_STATE;
+            }
             ESP_LOGI(TAG, "Opening FTDI 0x%04X:0x%04X", U2D2_VID, pids[i]);
             err = ftdi_vcp_open(pids[i], 0, &s_dev_config, &cdc);
             if (err == ESP_OK) {
@@ -320,20 +337,37 @@ static void u2d2_open_task(void *arg)
             vTaskDelay(pdMS_TO_TICKS(2000));
             continue;
         }
-
-        xSemaphoreTake(s_dev_sem, pdMS_TO_TICKS(2000));
-        if (s_ready) {
+        if (s_probe_paused) {
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
+        }
+        /* Do not poll VID/PID when no servo adapter has enumerated.
+         * Blind CDC/FTDI open (1.5 s each) starves LiDAR SCAN on the same host. */
+        if (!s_servo_present) {
+            xSemaphoreTake(s_dev_sem, pdMS_TO_TICKS(30000));
             continue;
         }
         /* Let new_dev_cb return before opening; CDC host forbids open inside it. */
         vTaskDelay(pdMS_TO_TICKS(50));
-
-        if (open_u2d2() == ESP_OK) {
+        if (s_probe_paused || !s_servo_present) {
             continue;
         }
 
-        ESP_LOGW(TAG, "USB2AX not open on GPIO%d/GPIO%d (swap=%d). Type swap only if D+/D- are reversed.",
-                 USB_DP_GPIO, USB_DM_GPIO, s_dp_dm_swapped);
+        if (open_u2d2() == ESP_OK) {
+            s_open_fails = 0;
+            continue;
+        }
+
+        s_open_fails++;
+        if (s_open_fails <= 2 || (s_open_fails % 8) == 0) {
+            ESP_LOGW(TAG, "USB2AX not open on GPIO%d/GPIO%d (swap=%d). Type swap only if D+/D- are reversed.",
+                     USB_DP_GPIO, USB_DM_GPIO, s_dp_dm_swapped);
+        }
+        if (s_open_fails >= 3) {
+            s_servo_present = false;
+            ESP_LOGW(TAG, "USB2AX probe paused until the adapter enumerates again");
+        }
+        vTaskDelay(pdMS_TO_TICKS(3000));
     }
 }
 
